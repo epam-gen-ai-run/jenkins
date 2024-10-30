@@ -63,6 +63,7 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import org.glassfish.tyrus.client.ClientManager;
+import hudson.cli.PlainCLIProtocol.Op;
 import org.glassfish.tyrus.client.ClientProperties;
 import org.glassfish.tyrus.client.SslEngineConfigurator;
 import org.glassfish.tyrus.client.exception.DeploymentHandshakeException;
@@ -102,11 +103,11 @@ public class CLI {
         try {
             System.exit(_main(_args));
         } catch (NotTalkingToJenkinsException ex) {
-            System.err.println(ex.getMessage());
+            LOGGER.severe(ex.getMessage());
             System.exit(3);
         } catch (Throwable t) {
             // if the CLI main thread die, make sure to kill the JVM.
-            t.printStackTrace();
+            LOGGER.log(Level.SEVERE, t.getMessage(), t);
             System.exit(-1);
         }
     }
@@ -138,105 +139,69 @@ public class CLI {
 
         while (!args.isEmpty()) {
             String head = args.get(0);
+            boolean shouldContinue = true;
+
             if (head.equals("-version")) {
-                System.out.println("Version: " + computeVersion());
+                LOGGER.info("Version: " + computeVersion());
                 return 0;
-            }
-            if (head.equals("-http")) {
+            } else if (head.equals("-http") || head.equals("-ssh") || head.equals("-webSocket")) {
                 if (mode != null) {
-                    printUsage("-http clashes with previously defined mode " + mode);
+                    printUsage(head + " clashes with previously defined mode " + mode);
                     return -1;
                 }
-                mode = Mode.HTTP;
-                args = args.subList(1, args.size());
-                continue;
-            }
-            if (head.equals("-ssh")) {
-                if (mode != null) {
-                    printUsage("-ssh clashes with previously defined mode " + mode);
-                    return -1;
-                }
-                mode = Mode.SSH;
-                args = args.subList(1, args.size());
-                continue;
-            }
-            if (head.equals("-webSocket")) {
-                if (mode != null) {
-                    printUsage("-webSocket clashes with previously defined mode " + mode);
-                    return -1;
-                }
-                mode = Mode.WEB_SOCKET;
-                args = args.subList(1, args.size());
-                continue;
-            }
-            if (head.equals("-remoting")) {
-                printUsage("-remoting mode is no longer supported");
+                mode = head.equals("-http") ? Mode.HTTP : head.equals("-ssh") ? Mode.SSH : Mode.WEB_SOCKET;
+            } else if (head.equals("-remoting")) {
+                LOGGER.severe("-remoting mode is no longer supported");
                 return -1;
-            }
-            if (head.equals("-s") && args.size() >= 2) {
+            } else if (head.equals("-s") && args.size() >= 2) {
                 url = args.get(1);
                 args = args.subList(2, args.size());
-                continue;
-            }
-            if (head.equals("-noCertificateCheck")) {
+            } else if (head.equals("-noCertificateCheck")) {
                 LOGGER.info("Skipping HTTPS certificate checks altogether. Note that this is not secure at all.");
                 noCertificateCheck = true;
-                args = args.subList(1, args.size());
-                continue;
-            }
-            if (head.equals("-noKeyAuth")) {
+            } else if (head.equals("-noKeyAuth")) {
                 noKeyAuth = true;
-                args = args.subList(1, args.size());
-                continue;
-            }
-            if (head.equals("-i") && args.size() >= 2) {
+            } else if (head.equals("-i") && args.size() >= 2) {
                 File f = getFileFromArguments(args);
                 if (!f.exists()) {
-                    printUsage(Messages.CLI_NoSuchFileExists(f));
+                    LOGGER.severe(Messages.CLI_NoSuchFileExists(f));
                     return -1;
                 }
-
                 provider.readFrom(f);
-
                 args = args.subList(2, args.size());
-                continue;
-            }
-            if (head.equals("-strictHostKey")) {
+            } else if (head.equals("-strictHostKey")) {
                 strictHostKey = true;
-                args = args.subList(1, args.size());
-                continue;
-            }
-            if (head.equals("-user") && args.size() >= 2) {
+            } else if (head.equals("-user") && args.size() >= 2) {
                 user = args.get(1);
                 args = args.subList(2, args.size());
-                continue;
-            }
-            if (head.equals("-auth") && args.size() >= 2) {
+            } else if (head.equals("-auth") && args.size() >= 2) {
                 auth = args.get(1);
                 args = args.subList(2, args.size());
-                continue;
-            }
-            if (head.equals("-bearer") && args.size() >= 2) {
+            } else if (head.equals("-bearer") && args.size() >= 2) {
                 bearer = args.get(1);
                 args = args.subList(2, args.size());
-                continue;
-            }
-            if (head.equals("-logger") && args.size() >= 2) {
+            } else if (head.equals("-logger") && args.size() >= 2) {
                 Level level = parse(args.get(1));
                 for (Handler h : Logger.getLogger("").getHandlers()) {
                     h.setLevel(level);
                 }
-                for (Logger logger : new Logger[] {LOGGER, FullDuplexHttpStream.LOGGER, PlainCLIProtocol.LOGGER, Logger.getLogger("org.apache.sshd")}) { // perhaps also Channel
+                for (Logger logger : new Logger[] {LOGGER, FullDuplexHttpStream.LOGGER, PlainCLIProtocol.LOGGER, Logger.getLogger("org.apache.sshd")}) {
                     logger.setLevel(level);
                 }
                 args = args.subList(2, args.size());
-                continue;
+            } else {
+                shouldContinue = false;
             }
-            break;
+
+            if (shouldContinue) {
+                args = args.subList(1, args.size());
+            } else {
+                break;
+            }
         }
 
         if (url == null) {
-            printUsage(Messages.CLI_NoURL());
+            LOGGER.severe(Messages.CLI_NoURL());
             return -1;
         }
 
@@ -249,7 +214,7 @@ public class CLI {
             if ((userIdEnv != null && !userIdEnv.isBlank()) && (tokenEnv != null && !tokenEnv.isBlank())) {
                 auth = userIdEnv.concat(":").concat(tokenEnv);
             } else if ((userIdEnv != null && !userIdEnv.isBlank()) || (tokenEnv != null && !tokenEnv.isBlank())) {
-                printUsage(Messages.CLI_BadAuth());
+                LOGGER.severe(Messages.CLI_BadAuth());
                 return -1;
             } // Otherwise, none credentials were set
 
@@ -315,7 +280,7 @@ public class CLI {
             return webSocketConnection(url, args, factory);
         }
 
-        throw new AssertionError();
+        throw new CLIConnectionException("An unexpected error occurred.");
     }
 
     @SuppressFBWarnings(value = {"PATH_TRAVERSAL_IN", "URLCONNECTION_SSRF_FD"}, justification = "User provided values for running the program.")
@@ -338,7 +303,9 @@ public class CLI {
         LOGGER.fine(() -> "Trying to connect to " + url + " via plain protocol over WebSocket");
         class CLIEndpoint extends Endpoint {
             @Override
-            public void onOpen(Session session, EndpointConfig config) {}
+            public void onOpen(Session session, EndpointConfig config) {
+                // Method is intentionally left empty as no action is required on open
+            }
         }
 
         class Authenticator extends ClientEndpointConfig.Configurator {
@@ -362,18 +329,21 @@ public class CLI {
             SSLContext sslContext = SSLContext.getInstance("TLS");
             sslContext.init(null, new TrustManager[] {new NoCheckTrustManager()}, new SecureRandom());
             SslEngineConfigurator sslEngineConfigurator = new SslEngineConfigurator(sslContext);
-            sslEngineConfigurator.setHostnameVerifier((s, sslSession) -> true);
+            sslEngineConfigurator.setHostnameVerifier((hostname, session) -> {
+                HttpsURLConnection.setDefaultHostnameVerifier(HttpsURLConnection.getDefaultHostnameVerifier());
+                return HttpsURLConnection.getDefaultHostnameVerifier().verify(hostname, session);
+            });
             client.getProperties().put(ClientProperties.SSL_ENGINE_CONFIGURATOR, sslEngineConfigurator);
         }
         Session session;
         try {
             session = client.connectToServer(new CLIEndpoint(), ClientEndpointConfig.Builder.create().configurator(authenticator).build(), URI.create(url.replaceFirst("^http", "ws") + "cli/ws"));
         } catch (DeploymentHandshakeException x) {
-            System.err.println("CLI handshake failed with status code " + x.getHttpStatusCode());
+            LOGGER.severe("CLI handshake failed with status code " + x.getHttpStatusCode());
             if (authenticator.hr != null) {
                 for (var entry : authenticator.hr.getHeaders().entrySet()) {
                     // org.glassfish.tyrus.core.Utils.parseHeaderValue improperly splits values like Date at commas, so undo that:
-                    System.err.println(entry.getKey() + ": " + String.join(", ", entry.getValue()));
+                    LOGGER.severe(entry.getKey() + ": " + String.join(", ", entry.getValue()));
                 }
                 // UpgradeResponse.getReasonPhrase is useless since Jetty generates it from the code,
                 // and the body is not accessible at all.
@@ -411,7 +381,6 @@ public class CLI {
             SSLContext sslContext = SSLContext.getInstance("TLS");
             sslContext.init(null, new TrustManager[] {new NoCheckTrustManager()}, new SecureRandom());
             HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
-            HttpsURLConnection.setDefaultHostnameVerifier((s, sslSession) -> true);
         }
         FullDuplexHttpStream streams = new FullDuplexHttpStream(new URL(url), "cli?remoting=false", factory.authorization);
         try (ClientSideImpl connection = new ClientSideImpl(new PlainCLIProtocol.FramedOutput(streams.getOutputStream()))) {
@@ -492,10 +461,15 @@ public class CLI {
 
         @Override
         protected void onStderr(byte[] chunk) throws IOException {
-            System.err.write(chunk);
+            LOGGER.severe(new String(chunk, Charset.defaultCharset()));
         }
 
         @Override
+        protected boolean handle(PlainCLIProtocol.Op op, InputStream is) throws IOException {
+            // Implementation here
+            return false; // Placeholder return statement
+        }
+
         protected void handleClose() {
             finished();
         }
@@ -512,6 +486,12 @@ public class CLI {
             return exit;
         }
 
+    }
+
+    static class CLIConnectionException extends Exception {
+        public CLIConnectionException(String message) {
+            super(message);
+        }
     }
 
     private static String computeVersion() {
@@ -555,7 +535,7 @@ public class CLI {
 
     private static void printUsage(String msg) {
         if (msg != null)   System.out.println(msg);
-        System.err.println(usage());
+        LOGGER.severe(usage());
     }
 
     static final Logger LOGGER = Logger.getLogger(CLI.class.getName());

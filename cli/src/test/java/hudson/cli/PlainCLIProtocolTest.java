@@ -107,13 +107,6 @@ public class PlainCLIProtocolTest {
 
             @Override
             protected void onStdin(byte[] chunk) throws IOException {
-                /* To inject a race condition:
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException x) {
-                    throw new IOException(x);
-                }
-                */
                 stdin.write(chunk);
             }
 

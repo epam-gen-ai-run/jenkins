@@ -31,6 +31,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.FilterInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.channels.ClosedChannelException;
@@ -38,8 +39,9 @@ import java.nio.channels.ReadPendingException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.io.IOUtils;
-import org.apache.commons.io.input.BoundedInputStream;
-import org.apache.commons.io.input.CountingInputStream;
+import java.io.FilterInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 
 /**
  * CLI protocol working over a plain socket-like connection, without SSH or Remoting.
@@ -52,7 +54,7 @@ class PlainCLIProtocol {
     static final Logger LOGGER = Logger.getLogger(PlainCLIProtocol.class.getName());
 
     /** One-byte operation to send to the other side. */
-    private enum Op {
+    public enum Op {
         /** UTF-8 command name or argument. */
         ARG(true),
         /** UTF-8 locale identifier. */
@@ -108,14 +110,14 @@ class PlainCLIProtocol {
     static final class FramedReader extends Thread {
 
         private final EitherSide side;
-        private final CountingInputStream cis;
+        private final CustomCountingInputStream cis;
         private final FlightRecorderInputStream flightRecorder;
         private final DataInputStream dis;
 
         FramedReader(EitherSide side, InputStream is) {
-            super("PlainCLIProtocol"); // TODO set distinctive Thread.name
+            super("PlainCLIProtocol-" + side.getClass().getSimpleName());
             this.side = side;
-            cis = new CountingInputStream(is);
+            cis = new CustomCountingInputStream(is);
             flightRecorder = new FlightRecorderInputStream(cis);
             dis = new DataInputStream(flightRecorder);
         }
@@ -129,27 +131,18 @@ class PlainCLIProtocol {
                     try {
                         framelen = dis.readInt();
                     } catch (EOFException x) {
-                        side.handleClose();
-                        break; // TODO verify that we hit EOF immediately, not partway into framelen
+                        if (dis.available() == 0) {
+                            side.handleClose();
+                            break;
+                        }
+                        throw x;
                     }
                     if (framelen < 0) {
                         throw new IOException("corrupt stream: negative frame length");
                     }
-                    LOGGER.finest("read frame length " + framelen);
+                    LOGGER.finest(String.format("read frame length %d", framelen));
                     long start = cis.getByteCount();
-                    try {
-                        side.handle(new DataInputStream(new BoundedInputStream(dis, /* op byte not counted */framelen + 1)));
-                    } catch (ProtocolException x) {
-                        LOGGER.log(Level.WARNING, null, x);
-                        // but read another frame
-                    } finally {
-                        long actuallyRead = cis.getByteCount() - start;
-                        long unread = framelen + 1 - actuallyRead;
-                        if (unread > 0) {
-                            LOGGER.warning(() -> "Did not read " + unread + " bytes");
-                            IOUtils.skipFully(dis, unread);
-                        }
-                    }
+                    handleFrame(dis, start, framelen);
                 }
             } catch (ClosedChannelException x) {
                 LOGGER.log(Level.FINE, null, x);
@@ -166,6 +159,90 @@ class PlainCLIProtocol {
             }
         }
 
+        private void handleFrame(DataInputStream dis, long start, int framelen) throws IOException {
+            byte opByte = dis.readByte();
+            Op op = Op.values()[opByte];
+            try (InputStream boundedInputStream = new CustomBoundedInputStream(dis, (long) framelen)) {
+                side.handle(op, new DataInputStream(boundedInputStream));
+            } catch (ProtocolException x) {
+                LOGGER.log(Level.WARNING, null, x);
+                // but read another frame
+            } finally {
+                long actuallyRead = cis.getByteCount() - start;
+                long unread = framelen - actuallyRead;
+                if (unread > 0) {
+                    LOGGER.warning(() -> "Did not read " + unread + " bytes");
+                    IOUtils.skipFully(dis, unread);
+                }
+            }
+        }
+
+    }
+
+    private static class CustomBoundedInputStream extends FilterInputStream {
+        private final long max;
+        private long pos = 0;
+
+        CustomBoundedInputStream(InputStream in, long max) {
+            super(in);
+            this.max = max;
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (pos >= max) {
+                return -1;
+            }
+            int result = super.read();
+            if (result != -1) {
+                pos++;
+            }
+            return result;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            if (pos >= max) {
+                return -1;
+            }
+            long remaining = max - pos;
+            int bytesRead = super.read(b, off, (int)Math.min(len, remaining));
+            if (bytesRead != -1) {
+                pos += bytesRead;
+            }
+            return bytesRead;
+        }
+    }
+
+    private static final class CustomCountingInputStream extends FilterInputStream {
+        private long byteCount;
+
+        protected CustomCountingInputStream(InputStream in) {
+            super(in);
+            this.byteCount = 0;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int b = super.read();
+            if (b != -1) {
+                byteCount++;
+            }
+            return b;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            int bytesRead = super.read(b, off, len);
+            if (bytesRead != -1) {
+                byteCount += bytesRead;
+            }
+            return bytesRead;
+        }
+
+        public long getByteCount() {
+            return byteCount;
+        }
     }
 
     private static final class ProtocolException extends IOException {
@@ -199,7 +276,7 @@ class PlainCLIProtocol {
             }
         }
 
-        protected abstract boolean handle(Op op, DataInputStream dis) throws IOException;
+        protected abstract boolean handle(Op op, InputStream is) throws IOException;
 
         protected final synchronized void send(Op op) throws IOException {
             send(op, new byte[0], 0, 0);
@@ -261,7 +338,8 @@ class PlainCLIProtocol {
         }
 
         @Override
-        protected final boolean handle(Op op, DataInputStream dis) throws IOException {
+        protected final boolean handle(Op op, InputStream is) throws IOException {
+            DataInputStream dis = new DataInputStream(is);
             assert op.clientSide;
             switch (op) {
             case ARG:
@@ -320,7 +398,8 @@ class PlainCLIProtocol {
         }
 
         @Override
-        protected boolean handle(Op op, DataInputStream dis) throws IOException {
+        protected boolean handle(Op op, InputStream is) throws IOException {
+            DataInputStream dis = new DataInputStream(is);
             assert !op.clientSide;
             switch (op) {
             case EXIT:

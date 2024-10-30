@@ -12,12 +12,12 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 @Execution(ExecutionMode.CONCURRENT)
-public class HexDumpTest {
+class HexDumpTest {
 
   @DisplayName("Test HexDump.toHex(byte[] buf)")
   @ParameterizedTest(name = "{index} => expected: {0}, buf: {1}")
   @MethodSource("testToHex1Sources")
-  public void testToHex1(String expected, byte[] buf) {
+  void testToHex1(String expected, byte[] buf) {
     assertEquals(expected, HexDump.toHex(buf));
   }
 
@@ -34,7 +34,7 @@ public class HexDumpTest {
   @DisplayName("Test HexDump.toHex(byte[] buf, int start, int len)")
   @ParameterizedTest(name = "{index} => expected: {0}, buf: {1}, start: {2}, len: {3}")
   @MethodSource("testToHex2Sources")
-  public void testToHex2(String expected, byte[] buf, int start, int len) {
+  void testToHex2(String expected, byte[] buf, int start, int len) {
     assertEquals(expected, HexDump.toHex(buf, start, len));
   }
 

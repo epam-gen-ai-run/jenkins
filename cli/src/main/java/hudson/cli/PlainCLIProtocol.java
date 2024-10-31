@@ -144,7 +144,7 @@ class PlainCLIProtocol {
                         // but read another frame
                     } finally {
                         long actuallyRead = cis.getByteCount() - start;
-                        long unread = framelen + 1 - actuallyRead;
+                        long unread = (long) framelen + 1 - actuallyRead;
                         if (unread > 0) {
                             LOGGER.warning(() -> "Did not read " + unread + " bytes");
                             IOUtils.skipFully(dis, unread);
@@ -156,6 +156,7 @@ class PlainCLIProtocol {
                 side.handleClose();
             } catch (IOException x) {
                 LOGGER.log(Level.WARNING, null, flightRecorder.analyzeCrash(x, "broken stream"));
+                side.handleClose();
             } catch (ReadPendingException x) {
                 // in case trick in CLIAction does not work
                 LOGGER.log(Level.FINE, null, x);
@@ -327,7 +328,7 @@ class PlainCLIProtocol {
                 onExit(dis.readInt());
                 return true;
             case STDOUT:
-                onStdout(dis.readAllBytes());
+                onStdout(dis);
                 return true;
             case STDERR:
                 onStderr(dis.readAllBytes());
@@ -339,8 +340,7 @@ class PlainCLIProtocol {
 
         protected abstract void onExit(int code);
 
-        // TODO more efficient to change signature to InputStream, then use IOUtils.copy
-        protected abstract void onStdout(byte[] chunk) throws IOException;
+        protected abstract void onStdout(InputStream chunk) throws IOException;
 
         protected abstract void onStderr(byte[] chunk) throws IOException;
 

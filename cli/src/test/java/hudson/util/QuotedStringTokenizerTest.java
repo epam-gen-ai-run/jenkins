@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Test;
 /**
  * @author Kohsuke Kawaguchi
  */
-public class QuotedStringTokenizerTest {
+class QuotedStringTokenizerTest {
 
     @Test
     public void test1() {

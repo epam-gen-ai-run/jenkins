@@ -471,13 +471,12 @@ public class QuotedStringTokenizer
                         b.append('\b');
                         break;
                     case 'u':
-                        b.append((char) (
-                                (convertHexDigit((byte) s.charAt(i++)) << 24) +
-                                (convertHexDigit((byte) s.charAt(i++)) << 16) +
-                                (convertHexDigit((byte) s.charAt(i++)) << 8) +
-                                convertHexDigit((byte) s.charAt(i++))
-                                )
-                        );
+                        byte hex1 = convertHexDigit((byte) s.charAt(i));
+                        byte hex2 = convertHexDigit((byte) s.charAt(i+1));
+                        byte hex3 = convertHexDigit((byte) s.charAt(i+2));
+                        byte hex4 = convertHexDigit((byte) s.charAt(i+3));
+                        b.append((char) ((hex1 << 24) + (hex2 << 16) + (hex3 << 8) + hex4));
+                        i += 4;
                         break;
                     default:
                         b.append(c);

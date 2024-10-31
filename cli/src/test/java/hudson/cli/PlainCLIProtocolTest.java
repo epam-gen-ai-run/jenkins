@@ -29,9 +29,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.nio.charset.Charset;
+import org.apache.commons.io.IOUtils;
 import org.junit.jupiter.api.Test;
 
 public class PlainCLIProtocolTest {
@@ -55,11 +57,10 @@ public class PlainCLIProtocolTest {
             }
 
             @Override
-            protected void onStdout(byte[] chunk) throws IOException {
-                stdout.write(chunk);
+            protected void onStdout(InputStream chunk) throws IOException {
+                IOUtils.copy(chunk, stdout);
             }
 
-            @Override
             protected void onStderr(byte[] chunk) throws IOException {}
 
             @Override
@@ -107,13 +108,6 @@ public class PlainCLIProtocolTest {
 
             @Override
             protected void onStdin(byte[] chunk) throws IOException {
-                /* To inject a race condition:
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException x) {
-                    throw new IOException(x);
-                }
-                */
                 stdin.write(chunk);
             }
 
